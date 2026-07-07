@@ -43,9 +43,14 @@ class AIOPlatform:
                  llm_config: AgentConfig,
                  env_client: Optional[EnvironmentClient] = None,
                  max_iterations: int = 6,
-                 max_context_tokens: int = 25000,
-                 max_output_tokens: int = 8000,
-                 debug_no_submit: bool = False):
+                 max_context_tokens: int = 15000,
+                 max_output_tokens: int = 4000,
+                 debug_no_submit: bool = False,
+                 use_connector: bool = False,
+                 observer_llm_config: Optional[AgentConfig] = None,
+                 probe_llm_config: Optional[AgentConfig] = None,
+                 executor_llm_config: Optional[AgentConfig] = None,
+                 compressor_llm_config: Optional[AgentConfig] = None):
         """
         初始化AI运维平台
 
@@ -63,10 +68,16 @@ class AIOPlatform:
 
         # 配置
         self.llm_config = llm_config
+        self.observer_llm_config = observer_llm_config or llm_config
+        self.probe_llm_config = probe_llm_config or llm_config
+        self.executor_llm_config = executor_llm_config or llm_config
+        self.compressor_llm_config = compressor_llm_config or llm_config
+        
         self.max_iterations = max_iterations
         self.max_context_tokens = max_context_tokens
         self.max_output_tokens = max_output_tokens
         self.debug_no_submit = debug_no_submit
+        self.use_connector = use_connector
 
         # 环境客户端
         self.env_client = env_client
@@ -122,7 +133,7 @@ class AIOPlatform:
         print("=" * 60)
         # 创建Observer - 它会自动初始化子任务队列，并从problem_id中提取任务类型
         self.observer = ObserverAgent(
-            llm_config=self.llm_config,
+            llm_config=self.observer_llm_config,
             memory_manager=self.memory_manager,
             max_iterations=self.max_iterations,
             task_description=task_description,
@@ -134,7 +145,7 @@ class AIOPlatform:
 
         # 创建Probe
         self.probe = ProbeAgent(
-            llm_config=self.llm_config,
+            llm_config=self.probe_llm_config,
             memory_manager=self.memory_manager,
             max_iterations=3,
             task_description=task_description,
@@ -144,7 +155,7 @@ class AIOPlatform:
 
         # 创建Executor
         self.executor = ExecutorAgent(
-            llm_config=self.llm_config,
+            llm_config=self.executor_llm_config,
             memory_manager=self.memory_manager,
             probe_agent=self.probe,
             max_iterations=1,
@@ -156,7 +167,7 @@ class AIOPlatform:
 
         # 创建Compressor
         self.compressor = CompressorAgent(
-            llm_config=self.llm_config,
+            llm_config=self.compressor_llm_config,
             memory_manager=self.memory_manager,
             max_output_tokens=self.max_output_tokens,
             max_context_tokens=self.max_context_tokens
@@ -733,6 +744,63 @@ class AIOPlatform:
             self._initialize_agents(task_info)
 
             # 主循环 - 执行子任务队列
+            if self.use_connector:
+                self.logger.info("\n🔌 DELEGATING TO METAKUBE CONNECTOR 🔌")
+                import sys
+                import os
+                root_dir = os.path.dirname(os.path.dirname(__file__))
+                if root_dir not in sys.path:
+                    sys.path.insert(0, root_dir)
+                
+                from connector.memory import UnifiedEPMN
+                from connector.router import MetaCognitiveRouter
+                from connector.graph_traversal import MemoryBiasedGraphTraversal
+                from connector.live_adapters import (
+                    SymptomEncoderAdapter,
+                    RealObserverAdapter,
+                    RealProbeAdapter,
+                    RealExecutorAdapter,
+                    RealCompressorAdapter,
+                    RealOutcomeVerifierAdapter
+                )
+                from connector.runtime import IncidentHandler
+
+                epmn = UnifiedEPMN()
+                router = MetaCognitiveRouter()
+                kubegraph = MemoryBiasedGraphTraversal({})
+                encoder = SymptomEncoderAdapter()
+                
+                obs_adapter = RealObserverAdapter(self.observer)
+                probe_adapter = RealProbeAdapter(self.env_client)
+                exec_adapter = RealExecutorAdapter(self.env_client)
+                comp_adapter = RealCompressorAdapter(self.compressor)
+                verifier = RealOutcomeVerifierAdapter(self.env_client)
+
+                handler = IncidentHandler(
+                    symptom_encoder=encoder,
+                    epmn=epmn,
+                    router=router,
+                    kubegraph=kubegraph,
+                    observer=obs_adapter,
+                    probe=probe_adapter,
+                    executor=exec_adapter,
+                    compressor=comp_adapter,
+                    outcome_verifier=verifier
+                )
+                handler.set_tau(0.5)
+
+                trajectory, is_success = handler.handle_incident(str(task_info), {})
+                
+                self.logger.info(f"Connector finished. Success: {is_success}")
+                
+                return {
+                    "success": is_success,
+                    "iterations": len(trajectory.command_sequence),
+                    "solution": "Delegated to MetaKube",
+                    "session_id": self.session_id,
+                    "evaluation_results": self.evaluation_results
+                }
+
             for iteration in range(1, self.max_iterations + 1):
                 self.current_iteration = iteration
 

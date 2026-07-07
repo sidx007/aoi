@@ -152,7 +152,13 @@ class AIOpsLabEvaluator:
                  server_port: int = 8002,
                  max_context_tokens: int = 25000,
                  max_output_tokens: int = 8000,
-                 debug_no_submit: bool = False):
+                 debug_no_submit: bool = False,
+                 use_connector: bool = True,
+                 observer_llm_config: Optional["llm_config.AgentConfig"] = None,
+                 probe_llm_config: Optional["llm_config.AgentConfig"] = None,
+                 executor_llm_config: Optional["llm_config.AgentConfig"] = None,
+                 compressor_llm_config: Optional["llm_config.AgentConfig"] = None,
+                 quiet_mode: bool = False):
         """
         Initialize the evaluator.
 
@@ -173,6 +179,13 @@ class AIOpsLabEvaluator:
         self.max_context_tokens = max_context_tokens
         self.max_output_tokens = max_output_tokens
         self.debug_no_submit = debug_no_submit
+        self.use_connector = use_connector
+        
+        self.observer_llm_config = observer_llm_config
+        self.probe_llm_config = probe_llm_config
+        self.executor_llm_config = executor_llm_config
+        self.compressor_llm_config = compressor_llm_config
+        self.quiet_mode = quiet_mode
 
         # Set environment server
         EnvironmentClient.set_default_server(host=server_host, port=server_port)
@@ -218,7 +231,12 @@ class AIOpsLabEvaluator:
                     max_iterations=14,
                     max_context_tokens=self.max_context_tokens,
                     max_output_tokens=self.max_output_tokens,
-                    debug_no_submit=self.debug_no_submit
+                    debug_no_submit=self.debug_no_submit,
+                    use_connector=self.use_connector,
+                    observer_llm_config=self.observer_llm_config,
+                    probe_llm_config=self.probe_llm_config,
+                    executor_llm_config=self.executor_llm_config,
+                    compressor_llm_config=self.compressor_llm_config
                 )
 
                 # 运行问题解决
@@ -320,8 +338,12 @@ class AIOpsLabEvaluator:
         results = []
         total_start = datetime.now()
 
+        total_problems = len(problem_ids)
         for i, problem_id in enumerate(problem_ids, 1):
-            self.logger.info(f"\n[{i}/{len(problem_ids)}] Processing: {problem_id}")
+            if self.quiet_mode:
+                print(f"[INFO] Task {i} out of {total_problems} performed, {total_problems - i} left. (Problem: {problem_id})")
+            else:
+                self.logger.info(f"\n[{i}/{len(problem_ids)}] Processing: {problem_id}")
 
             result = await self.evaluate_problem(problem_id, max_retries=max_retries)
             results.append(result)
@@ -759,6 +781,7 @@ async def main():
     parser.add_argument("--temperature", type=float, help="LLM temperature")
     parser.add_argument("--max-context-tokens", type=int, default=25000, help="Max context tokens for Observer")
     parser.add_argument("--max-output-tokens", type=int, default=8000, help="Max output tokens")
+    parser.add_argument("--no-connector", action="store_true", help="Disable the MetaKube connector and run standalone AIOPlatform")
 
     args = parser.parse_args()
 
@@ -819,13 +842,15 @@ async def main():
 
     # 创建评估器
     debug_no_submit = DEV_DEBUG_NO_SUBMIT if DEV_MODE else False
+    use_connector = not args.no_connector
     evaluator = AIOpsLabEvaluator(
         llm_config=llm_config_obj,
         server_host=args.host,
         server_port=args.port,
         max_context_tokens=max_context_tokens,
         max_output_tokens=max_output_tokens,
-        debug_no_submit=debug_no_submit
+        debug_no_submit=debug_no_submit,
+        use_connector=use_connector
     )
 
     # Apply exclusion list
