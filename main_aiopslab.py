@@ -409,7 +409,9 @@ class AIOpsLabEvaluator:
             self.logger.info(f"\n❌ Failed Problems:")
             for result in results:
                 if not result["success"]:
-                    error_msg = result.get('error', 'Unknown')
+                    error_msg = result.get('error')
+                    if error_msg is None:
+                        error_msg = 'Unknown'
                     if len(error_msg) > 100:
                         error_msg = error_msg[:100] + "..."
                     self.logger.error(f"  - {result['problem_id']}: {error_msg}")
