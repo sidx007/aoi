@@ -58,7 +58,7 @@ class SubTaskItem(BaseMemoryItem):
     # 执行相关
     status: TaskStatus = TaskStatus.PENDING
     execution_rounds: int = 0
-    max_rounds: int = 5
+    max_rounds: int = 15
     executor_id: Optional[str] = None
 
     # 新增字段

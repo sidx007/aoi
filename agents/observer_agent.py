@@ -187,7 +187,7 @@ class ObserverAgent(BaseAgent):
                         "total_iterations": self.max_iterations,
                         "task_description": self.task_description
                     },
-                    max_rounds=5
+                    max_rounds=15
                 )
 
                 # 添加到内存和队列
@@ -258,7 +258,7 @@ class ObserverAgent(BaseAgent):
                     "iteration": i,
                     "total_iterations": self.max_iterations
                 },
-                max_rounds=5
+                max_rounds=15
             )
 
             self.memory_manager.add_item(subtask, self.agent_type)
