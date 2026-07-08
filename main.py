@@ -35,6 +35,64 @@ from memory.memory_item import (
 # 导入AWorld配置
 from aworld.config.conf import AgentConfig
 
+_metakube_state = None
+
+def get_metakube_state():
+    global _metakube_state
+    if _metakube_state is None:
+        import sys
+        import os
+        import networkx as nx
+        
+        root_dir = os.path.dirname(os.path.dirname(__file__))
+        if root_dir not in sys.path:
+            sys.path.insert(0, root_dir)
+            
+        from connector.memory import UnifiedEPMN
+        from connector.router import MetaCognitiveRouter
+        from connector.graph_traversal import MemoryBiasedGraphTraversal
+        from connector.live_adapters import SymptomEncoderAdapter
+        
+        epmn = UnifiedEPMN()
+        router = MetaCognitiveRouter()
+        encoder = SymptomEncoderAdapter()
+        
+        # Load graph
+        graph_path = os.path.join(root_dir, "data", "kubegraph", "graph.pkl")
+        if os.path.exists(graph_path):
+            try:
+                import pickle
+                with open(graph_path, "rb") as f:
+                    kubegraph_nx = pickle.load(f)
+                    
+                if isinstance(kubegraph_nx, dict):
+                    kubegraph_nx = nx.node_link_graph(kubegraph_nx)
+            except Exception as e:
+                print(f"Failed to load kubegraph: {e}")
+                kubegraph_nx = nx.DiGraph()
+        else:
+            kubegraph_nx = nx.DiGraph()
+            
+        class KubeGraphWrapper:
+            def __init__(self, g):
+                self.g = g
+                self.nodes = list(g.nodes()) if hasattr(g, 'nodes') else []
+            def get_neighbors(self, n):
+                if hasattr(self.g, 'successors') and n in self.g:
+                    return list(self.g.successors(n))
+                elif hasattr(self.g, 'neighbors') and n in self.g:
+                    return list(self.g.neighbors(n))
+                return []
+                
+        kubegraph = MemoryBiasedGraphTraversal(KubeGraphWrapper(kubegraph_nx))
+        
+        _metakube_state = {
+            "epmn": epmn,
+            "router": router,
+            "encoder": encoder,
+            "kubegraph": kubegraph
+        }
+    return _metakube_state
 
 class AIOPlatform:
     """AI运维平台主类"""
@@ -765,10 +823,13 @@ class AIOPlatform:
                 )
                 from connector.runtime import IncidentHandler
 
-                epmn = UnifiedEPMN()
-                router = MetaCognitiveRouter()
-                kubegraph = MemoryBiasedGraphTraversal({})
-                encoder = SymptomEncoderAdapter()
+                from connector.models import Episode
+                
+                state = get_metakube_state()
+                epmn = state["epmn"]
+                router = state["router"]
+                kubegraph = state["kubegraph"]
+                encoder = state["encoder"]
                 
                 obs_adapter = RealObserverAdapter(self.observer)
                 probe_adapter = RealProbeAdapter(self.env_client)
@@ -790,6 +851,18 @@ class AIOPlatform:
                 handler.set_tau(0.5)
 
                 trajectory, is_success = handler.handle_incident(str(task_info), {})
+                
+                if trajectory:
+                    embedding = encoder.encode(trajectory.initial_Q)
+                    episode = Episode(
+                        symptoms=trajectory.initial_Q,
+                        context=trajectory.cluster_snapshot,
+                        actions=trajectory.command_sequence,
+                        outcome=is_success,
+                        embedding=embedding
+                    )
+                    epmn.insert(episode)
+                    print(f"[INFO] 💾 Saved Episode {episode.id} to EPMN! Total memories in pool: {len(epmn.E)}")
                 
                 self.logger.info(f"Connector finished. Success: {is_success}")
                 
