@@ -122,8 +122,9 @@ class AgentLogger:
 
         formatted_message = f"{color}{tag}{self.COLORS['RESET']} {message}"
 
-        # 输出到控制台
-        print(formatted_message)
+        # 输出到控制台 (unless quiet_mode is enabled globally)
+        if not getattr(AgentLogger, "quiet_mode", False):
+            print(formatted_message)
 
         # 同时写入文件
         FileLogHandler.write(f"{tag} {message}")
@@ -140,14 +141,16 @@ class AgentLogger:
         """成功日志（绿色）"""
         if self.enabled:
             formatted = f"\033[92m[{self.agent_name}] ✅ {message}\033[0m"
-            print(formatted)
+            if not getattr(AgentLogger, "quiet_mode", False):
+                print(formatted)
             FileLogHandler.write(f"[{self.agent_name}] ✅ {message}")
 
     def warning(self, message: str):
         """警告日志"""
         if self.enabled:
             formatted = f"\033[93m[{self.agent_name}] ⚠️ {message}\033[0m"
-            print(formatted)
+            if not getattr(AgentLogger, "quiet_mode", False):
+                print(formatted)
             FileLogHandler.write(f"[{self.agent_name}] ⚠️ {message}")
     
     def file_only(self, message: str, level: LogLevel = LogLevel.INFO):
@@ -182,11 +185,12 @@ class AgentLogger:
             color = self.COLORS["ERROR"]
         else:
             color = self.color
-        
+            
         formatted_message = f"{color}{tag}{self.COLORS['RESET']} {message}"
         
-        # 只打印到控制台，不写入文件
-        print(formatted_message)
+        # 只输出到控制台，不写入文件
+        if not getattr(AgentLogger, "quiet_mode", False):
+            print(formatted_message)
 
 
 def setup_logging():

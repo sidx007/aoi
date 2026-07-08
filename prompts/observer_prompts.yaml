@@ -348,7 +348,7 @@ system_prompt: |
   **JSON Required**:
   ```json
   {
-    "previous_iteration_summary": "Required if iter >= 2. Include: actions taken, verbatim errors, technical details, interpretation",
+    "previous_iteration_summary": "Required if iter >= 2. MUST quote exact error strings and dial targets verbatim (e.g. 'dial tcp 10.0.1.5:9090'). Do NOT paraphrase errors. Include actions taken and technical details.",
     
     "current_phase": "surface_scan | point_investigation | depth_analysis | verification | ready_to_fix | ready_to_submit",
     
@@ -358,7 +358,8 @@ system_prompt: |
       "suspected_root_cause": "Component likely containing the defect",
       "identified_symptoms": ["List of components showing errors due to root cause"],
       "causality_chain": "How root cause leads to observed symptoms",
-      "confidence_in_root_cause": "Low | Medium | High"
+      "confidence_in_root_cause": "Low | Medium | High",
+      "eliminated_hypotheses": ["List of previously suspected root causes that have been disproven by evidence. Do NOT propose these again."]
     },
     
     "confidence": 0-100,
@@ -473,6 +474,7 @@ task_queue_init_prompt: |
   - NO executor actions needed
   - Progressive investigation: symptoms → causality → root cause
   - Must include configuration checks to verify root cause
+  - Do NOT split data collection and data analysis into separate subtasks. Data must be analyzed in the same iteration it is collected to prevent data loss.
   
   ### Mitigation Tasks (⚠️ MANDATORY STRUCTURE)
   **You MUST include executor actions - this is a repair task!**

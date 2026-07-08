@@ -679,11 +679,20 @@ class AIOPlatform:
             "total_tokens": total_tokens
         }
 
+        # Determine true success status for the root level
+        is_success = False
+        if self.evaluation_results:
+            is_success = (
+                self.evaluation_results.get('success') == True or
+                self.evaluation_results.get('Detection Accuracy') == 'Correct'
+            )
+            
         # 准备完整结果
         full_results = {
             "problem_id": problem_id,
             "session_id": self.session_id,
             "timestamp": datetime.now().isoformat(),
+            "success": is_success,
             "task_info": self.task_info,
             "token_usage": token_usage,  # 添加token使用统计
             "execution_results": self.execution_results,
@@ -832,8 +841,8 @@ class AIOPlatform:
                 encoder = state["encoder"]
                 
                 obs_adapter = RealObserverAdapter(self.observer)
-                probe_adapter = RealProbeAdapter(self.env_client)
-                exec_adapter = RealExecutorAdapter(self.env_client)
+                probe_adapter = RealProbeAdapter(self.probe, self.env_client)
+                exec_adapter = RealExecutorAdapter(self.executor, self.env_client)
                 comp_adapter = RealCompressorAdapter(self.compressor)
                 verifier = RealOutcomeVerifierAdapter(self.env_client)
 
@@ -865,6 +874,19 @@ class AIOPlatform:
                     print(f"[INFO] 💾 Saved Episode {episode.id} to EPMN! Total memories in pool: {len(epmn.E)}")
                 
                 self.logger.info(f"Connector finished. Success: {is_success}")
+                
+                # Assign success to evaluation results so save_execution_results correctly logs it
+                if not self.evaluation_results:
+                    self.evaluation_results = {}
+                self.evaluation_results['success'] = is_success
+                
+                # Save the results to JSON so the evaluation script can calculate metrics
+                if problem_id:
+                    try:
+                        result_file = self.save_execution_results(problem_id)
+                        self.logger.info(f"📁 Results saved to: {result_file}")
+                    except Exception as e:
+                        self.logger.warning(f"⚠️ Failed to save results: {e}")
                 
                 return {
                     "success": is_success,

@@ -512,7 +512,9 @@ class ProbeAgent(BaseAgent):
 
                 if command:
                     try:
+                        self.agent_logger.info(f"⚡ Executing Command: {command}")
                         exec_result = execute_action(command)
+                        self.agent_logger.info(f"📄 Raw Output:\n{exec_result}")
 
                         # 立即对结果进行去重处理
                         if exec_result and isinstance(exec_result, str) and len(exec_result) > 1000:

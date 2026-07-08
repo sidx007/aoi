@@ -562,6 +562,10 @@ class ObserverAgent(BaseAgent):
         # 确保iteration对应正确的任务索引
         self.current_task_index = min(iteration - 1, len(self.task_queue) - 1)
         
+        # Injected context from external caller (e.g. connector) should become the previous_iteration_context
+        if compressed_context:
+            self.previous_iteration_context = compressed_context
+        
         # 构建完整的上下文：历史总结 + 上一轮完整内容
         full_context = self._build_context_with_history("", iteration)
 
@@ -636,6 +640,19 @@ class ObserverAgent(BaseAgent):
                 else:
                     self.agent_logger.warning("⚠️ No executor_context provided by LLM")
                     output["executor_context"] = ""
+                    
+        # 强制最后一轮提交
+        if iteration == self.max_iterations:
+            self.agent_logger.warning("⚠️ Forcing submission on final iteration!")
+            output["next_agent"] = "complete"
+            output["ready_to_submit"] = True
+            output["status"] = "COMPLETE"
+            # 保留LLM可能的提交命令，否则给默认值
+            if "submission" not in output:
+                output["submission"] = {}
+            output["submission"]["ready_to_submit"] = True
+            if not output["submission"].get("submission_command"):
+                output["submission"]["submission_command"] = "submit()"
 
         return output
 
@@ -664,8 +681,8 @@ class ObserverAgent(BaseAgent):
             包含历史总结和上一轮完整上下文的组合字符串
         """
         if iteration == 1:
-            # 第一轮，没有历史
-            return current_context if current_context else ""
+            # 第一轮，可能已经有注入的历史数据
+            return self.previous_iteration_context if self.previous_iteration_context else (current_context if current_context else "")
         
         # 构建上下文：历史总结(1到n-2) + 上一轮完整内容(n-1)
         context_parts = []
