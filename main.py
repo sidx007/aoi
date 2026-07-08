@@ -54,6 +54,15 @@ def get_metakube_state():
         from connector.live_adapters import SymptomEncoderAdapter
         
         epmn = UnifiedEPMN()
+        epmn_path = os.path.join(root_dir, "data", "epmn", "epmn.pickle")
+        if os.path.exists(epmn_path):
+            try:
+                import pickle
+                with open(epmn_path, "rb") as f:
+                    epmn = pickle.load(f)
+            except Exception as e:
+                print(f"[METAKUBE] Failed to load EPMN from {epmn_path}: {e}")
+
         router = MetaCognitiveRouter()
         encoder = SymptomEncoderAdapter()
         
@@ -592,6 +601,22 @@ class AIOPlatform:
                         self.logger.info(f"[COMPRESSOR] Token count: {original_tokens} tokens (OK)")
                     
                     # 保存当前 iter n 的压缩上下文供 iter n+1 使用
+                    if self.use_connector:
+                        try:
+                            state = get_metakube_state()
+                            Q = state["encoder"].encode(compressed_context)
+                            M_star, _ = state["epmn"].retrieve(Q, K=10)
+                            G_star = state["kubegraph"].traverse(M_star, hop_budget=2)
+                            
+                            mk_block = "\n=== METAKUBE HYBRID CONTEXT ===\n"
+                            mk_block += f"EPMN Memories:\n{M_star}\n\n"
+                            mk_block += f"KubeGraph Paths:\n{G_star}\n"
+                            
+                            compressed_context += mk_block
+                            self.logger.info(f"[METAKUBE] Re-injected MetaKube context into Iteration {iteration+1}.")
+                        except Exception as e:
+                            self.logger.error(f"Failed to append MetaKube context: {e}")
+
                     self.observer.previous_iteration_context = compressed_context
                     self.logger.info(f"[COMPRESSOR] Saved iteration {iteration} compressed context for next iteration")
                     
@@ -810,91 +835,34 @@ class AIOPlatform:
             self.logger.info(f"\n🤖 Initializing agents and task queue...")
             self._initialize_agents(task_info)
 
-            # 主循环 - 执行子任务队列
+            # 初始化 MetaKube 并将上下文注入 Observer (仅第一次)
             if self.use_connector:
-                self.logger.info("\n🔌 DELEGATING TO METAKUBE CONNECTOR 🔌")
-                import sys
-                import os
-                root_dir = os.path.dirname(os.path.dirname(__file__))
-                if root_dir not in sys.path:
-                    sys.path.insert(0, root_dir)
-                
-                from connector.memory import UnifiedEPMN
-                from connector.router import MetaCognitiveRouter
-                from connector.graph_traversal import MemoryBiasedGraphTraversal
-                from connector.live_adapters import (
-                    SymptomEncoderAdapter,
-                    RealObserverAdapter,
-                    RealProbeAdapter,
-                    RealExecutorAdapter,
-                    RealCompressorAdapter,
-                    RealOutcomeVerifierAdapter
-                )
-                from connector.runtime import IncidentHandler
-
-                from connector.models import Episode
-                
-                state = get_metakube_state()
-                epmn = state["epmn"]
-                router = state["router"]
-                kubegraph = state["kubegraph"]
-                encoder = state["encoder"]
-                
-                obs_adapter = RealObserverAdapter(self.observer)
-                probe_adapter = RealProbeAdapter(self.probe, self.env_client)
-                exec_adapter = RealExecutorAdapter(self.executor, self.env_client)
-                comp_adapter = RealCompressorAdapter(self.compressor)
-                verifier = RealOutcomeVerifierAdapter(self.env_client)
-
-                handler = IncidentHandler(
-                    symptom_encoder=encoder,
-                    epmn=epmn,
-                    router=router,
-                    kubegraph=kubegraph,
-                    observer=obs_adapter,
-                    probe=probe_adapter,
-                    executor=exec_adapter,
-                    compressor=comp_adapter,
-                    outcome_verifier=verifier
-                )
-                handler.set_tau(0.5)
-
-                trajectory, is_success = handler.handle_incident(str(task_info), {})
-                
-                if trajectory:
-                    embedding = encoder.encode(trajectory.initial_Q)
-                    episode = Episode(
-                        symptoms=trajectory.initial_Q,
-                        context=trajectory.cluster_snapshot,
-                        actions=trajectory.command_sequence,
-                        outcome=is_success,
-                        embedding=embedding
-                    )
-                    epmn.insert(episode)
-                    print(f"[INFO] 💾 Saved Episode {episode.id} to EPMN! Total memories in pool: {len(epmn.E)}")
-                
-                self.logger.info(f"Connector finished. Success: {is_success}")
-                
-                # Assign success to evaluation results so save_execution_results correctly logs it
-                if not self.evaluation_results:
-                    self.evaluation_results = {}
-                self.evaluation_results['success'] = is_success
-                
-                # Save the results to JSON so the evaluation script can calculate metrics
-                if problem_id:
-                    try:
-                        result_file = self.save_execution_results(problem_id)
-                        self.logger.info(f"📁 Results saved to: {result_file}")
-                    except Exception as e:
-                        self.logger.warning(f"⚠️ Failed to save results: {e}")
-                
-                return {
-                    "success": is_success,
-                    "iterations": len(trajectory.command_sequence),
-                    "solution": "Delegated to MetaKube",
-                    "session_id": self.session_id,
-                    "evaluation_results": self.evaluation_results
-                }
+                self.logger.info("\n🔌 INTEGRATING METAKUBE CONTEXT 🔌")
+                try:
+                    state = get_metakube_state()
+                    encoder = state["encoder"]
+                    epmn = state["epmn"]
+                    kubegraph = state["kubegraph"]
+                    
+                    Q = encoder.encode(str(task_info))
+                    M_star, _ = epmn.retrieve(Q, K=10)
+                    G_star = kubegraph.traverse(M_star, hop_budget=2)
+                    
+                    mk_block = "=== METAKUBE HYBRID CONTEXT ===\n"
+                    if M_star:
+                        mk_block += f"EPMN Memories:\n{M_star}\n\n"
+                    else:
+                        mk_block += "EPMN Memories: []\n\n"
+                        
+                    if G_star:
+                        mk_block += f"KubeGraph Paths:\n{G_star}\n"
+                    else:
+                        mk_block += "KubeGraph Paths: []\n"
+                    
+                    self.observer.previous_iteration_context = mk_block
+                    self.logger.info(f"[METAKUBE] Injected {len(M_star)} memories and {len(G_star)} paths into Iteration 1.")
+                except Exception as e:
+                    self.logger.error(f"Failed to inject MetaKube context: {e}")
 
             for iteration in range(1, self.max_iterations + 1):
                 self.current_iteration = iteration
